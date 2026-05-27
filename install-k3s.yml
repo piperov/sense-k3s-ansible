@@ -105,7 +105,8 @@
                   - name: vip_retryperiod
                     value: "1"
                   - name: address
-                    value: "172.18.29.29"
+                    # value: "172.18.29.29"
+                    value: "{{ kube_vip_address }}"
                   image: ghcr.io/kube-vip/kube-vip:v0.6.4
                   imagePullPolicy: Always
                   name: kube-vip

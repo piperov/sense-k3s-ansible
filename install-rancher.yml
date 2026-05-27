@@ -26,18 +26,18 @@
         helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
         helm repo update
 
-    - name: Install cert-manager
-      shell: |
-        helm upgrade --install cert-manager jetstack/cert-manager \
-          --namespace cert-manager \
-          --create-namespace \
-          --set crds.enabled=true
+            - name: Install cert-manager
+              shell: |
+                helm upgrade --install cert-manager jetstack/cert-manager \
+                  --namespace cert-manager \
+                  --create-namespace \
+                  --set crds.enabled=true
 
     - name: Install Rancher
       shell: |
         helm upgrade --install rancher rancher-stable/rancher \
           --namespace cattle-system \
           --create-namespace \
-          --set hostname=sense-k3s.cms.rcac.purdue.edu \
+          --set hostname={{ rancher_hostname }} \
           --set replicas=3 \
           --set bootstrapPassword=admin

@@ -1,0 +1,50 @@
+---
+- name: Inspect K3s Ingress Controller (Traefik) and Routing
+  hosts: first_master
+  become: true
+  gather_facts: false
+
+  vars:
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+
+  tasks:
+    - name: Check Traefik ingress pod status
+      ansible.builtin.command:
+        cmd: kubectl get pods -n kube-system -l app.kubernetes.io/name=traefik --kubeconfig={{ k3s_kubeconfig }}
+      register: traefik_pods
+      changed_when: false
+
+    - name: Display Traefik pods
+      ansible.builtin.debug:
+        var: traefik_pods.stdout_lines
+
+    - name: Verify Ingress LoadBalancer service status and ports
+      ansible.builtin.command:
+        cmd: kubectl get svc traefik -n kube-system --kubeconfig={{ k3s_kubeconfig }}
+      register: traefik_svc
+      changed_when: false
+
+    - name: Display Traefik service configuration
+      ansible.builtin.debug:
+        var: traefik_svc.stdout_lines
+
+    - name: Fetch recent Traefik ingress logs for errors
+      ansible.builtin.command:
+        cmd: kubectl logs -n kube-system -l app.kubernetes.io/name=traefik --tail=30 --kubeconfig={{ k3s_kubeconfig }}
+      register: traefik_logs
+      changed_when: false
+
+    - name: Display Traefik logs (last 30 lines)
+      ansible.builtin.debug:
+        var: traefik_logs.stdout_lines
+
+    - name: List all active Ingress routing paths in the cluster
+      ansible.builtin.command:
+        cmd: kubectl get ingress --all-namespaces --kubeconfig={{ k3s_kubeconfig }}
+      register: cluster_ingresses
+      changed_when: false
+
+    - name: Display all cluster Ingress rules
+      ansible.builtin.debug:
+        var: cluster_ingresses.stdout_lines
+
