@@ -1,0 +1,41 @@
+---
+# Play 1: Check local services on all cluster nodes
+- name: Monitor Local HA K3s and Kube-VIP Instances
+  hosts: k3s_cluster
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Import local cluster health checks
+      ansible.builtin.import_tasks: tasks/k3s_local_checks.yml
+
+# Play 2: Run global cluster queries only from the first master
+- name: Run Global Cluster Control-Plane Diagnostics
+  hosts: first_master
+  become: true
+  gather_facts: false
+  vars:
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Import global control-plane diagnostics
+      ansible.builtin.import_tasks: tasks/k3s_global_queries.yml
+
+# Play 3: Test K3s network access endpoints from the first master
+- name: Test External Control Plane Routing Endpoints
+  hosts: first_master
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Import load balancer routing tests
+      ansible.builtin.import_tasks: tasks/k3s_network_tests.yml
+
+# Play 4: Run Rancher diagnostics and external URL health checks
+- name: Run Rancher Application Diagnostics
+  hosts: first_master
+  become: true
+  gather_facts: false
+  vars:
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Import Rancher health validation tasks
+      ansible.builtin.import_tasks: tasks/rancher_diagnostics.yml
+

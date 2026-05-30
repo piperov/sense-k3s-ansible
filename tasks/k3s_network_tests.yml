@@ -1,0 +1,14 @@
+---
+- name: Ping Kube-VIP load balancer address
+  ansible.builtin.command:
+    cmd: >
+      curl -k -s -o /dev/null -w "%{http_code}" https://{{ ansible_play_batch_vars['kube_vip_address'] | default(groups['k3s_cluster'] | map('extract', hostvars, 'kube_vip_address') | first) }}:6443/livez
+  register: vip_api_health
+  changed_when: false
+  failed_when: false
+
+- name: Display network routing results
+  ansible.builtin.debug:
+    msg:
+      - "Kube-VIP API Server status: {{ vip_api_health.stdout | default('UNREACHABLE') }}"
+

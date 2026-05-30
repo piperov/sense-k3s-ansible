@@ -125,7 +125,7 @@
                   operator: Exists
 
     - name: Install k3s on first master
-      shell: "curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san 172.18.29.29 --tls-san sense-k3s.cms.rcac.purdue.edu --disable servicelb"
+      shell: "curl -sfL https://get.k3s.io | sh -s - server --cluster-init --tls-san {{ kube_vip_address }} --tls-san {{ kube_vip_fqdn }} --disable servicelb"
 
     - name: Get k3s node token
       command: cat /var/lib/rancher/k3s/server/node-token
@@ -141,4 +141,21 @@
   become: yes
   tasks:
     - name: Install k3s on additional masters
-      shell: "curl -sfL https://get.k3s.io | K3S_URL=https://{{ hostvars[groups['first_master'][0]]['ansible_host'] | default(groups['first_master'][0]) }}:6443 K3S_TOKEN={{ hostvars[groups['first_master'][0]]['k3s_token'] }} sh -s - server --tls-san 172.18.29.29 --tls-san sense-k3s.cms.rcac.purdue.edu --disable servicelb"
+      shell: "curl -sfL https://get.k3s.io | K3S_URL=https://{{ hostvars[groups['first_master'][0]]['ansible_host'] | default(groups['first_master'][0]) }}:6443 K3S_TOKEN={{ hostvars[groups['first_master'][0]]['k3s_token'] }} sh -s - server --tls-san {{ kube_vip_address }} --tls-san {{ kube_vip_fqdn }} --disable servicelb"
+
+- name: Patch Traefik Service with the Cluster Virtual IP
+  kubernetes.core.k8s_json_patch:
+    kubeconfig: /etc/rancher/k3s/k3s.yaml # Adjust path if executing remotely
+    kind: Service
+    namespace: kube-system
+    name: traefik
+    patch:
+      - op: add
+        path: /spec/externalIPs
+        value:
+          - "{{ kube_vip_address }}" 
+  register: patch_result
+  until: patch_result is succeeded
+  retries: 5
+  delay: 10
+

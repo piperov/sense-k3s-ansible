@@ -1,0 +1,25 @@
+---
+- name: Check Rancher deployment rollout status
+  ansible.builtin.command:
+    cmd: kubectl rollout status deployment/rancher -n cattle-system --kubeconfig={{ k3s_kubeconfig }}
+  register: rancher_rollout
+  changed_when: false
+
+- name: Display Rancher deployment status
+  ansible.builtin.debug:
+    var: rancher_rollout.stdout_lines
+
+- name: Test internal Rancher dashboard URL
+  ansible.builtin.command:
+    cmd: >
+      curl -k -s -o /dev/null -w "%{http_code}" https://{{ ansible_play_batch_vars['rancher_hostname'] | default(groups['k3s_cluster'] | map('extract', hostvars, 'rancher_hostname') | first) }}/healthz
+  register: rancher_url_health
+  changed_when: false
+  failed_when: false
+  become: false # Keeps curl isolated from root context
+
+- name: Display Rancher web routing results
+  ansible.builtin.debug:
+    msg:
+      - "Rancher Hostname status: {{ rancher_url_health.stdout | default('UNREACHABLE') }}"
+

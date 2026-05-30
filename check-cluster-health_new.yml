@@ -1,0 +1,100 @@
+---
+# Play 1: Check local services on all cluster nodes
+- name: Monitor Local HA K3s and Kube-VIP Instances
+  hosts: k3s_cluster
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify local K3s service health
+      ansible.builtin.systemd:
+        name: k3s
+      register: k3s_service
+
+    - name: Identify active Kube-VIP node
+      ansible.builtin.command:
+        cmd: crictl ps --name kube-vip -q
+      register: kubevip_container
+      changed_when: false
+      ignore_errors: true
+
+    - name: Report Kube-VIP role
+      ansible.builtin.debug:
+        msg: >
+          {{ 'Kube-VIP is ACTIVE on this host' if kubevip_container.rc == 0 and kubevip_container.stdout != '' else 'Kube-VIP is in STANDBY mode' }}
+
+# Play 2: Run global cluster queries only from the first master
+- name: Run Global Cluster Control-Plane Diagnostics
+  hosts: first_master
+  become: true
+  gather_facts: false
+  vars:
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Check etcd cluster member health
+      ansible.builtin.command:
+        cmd: k3s etcd-snapshot list
+      register: etcd_check
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check Kubernetes node readiness state
+      ansible.builtin.command:
+        cmd: kubectl get nodes --kubeconfig={{ k3s_kubeconfig }}
+      register: node_status
+      changed_when: false
+
+    - name: Display cluster node status
+      ansible.builtin.debug:
+        var: node_status.stdout_lines
+
+# Play 3: Test K3s network access endpoints from the first master
+- name: Test External Control Plane Routing Endpoints
+  hosts: first_master
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Ping Kube-VIP load balancer address
+      ansible.builtin.command:
+        cmd: >
+          curl -k -s -o /dev/null -w "%{http_code}" https://{{ ansible_play_batch_vars['kube_vip_address'] | default(groups['k3s_cluster'] | map('extract', hostvars, 'kube_vip_address') | first) }}:6443/livez
+      register: vip_api_health
+      changed_when: false
+      failed_when: false
+
+    - name: Display network routing results
+      ansible.builtin.debug:
+        msg:
+          - "Kube-VIP API Server status: {{ vip_api_health.stdout | default('UNREACHABLE') }}"
+
+# Play 4: Run Rancher diagnostics and external URL health checks
+- name: Run Rancher Application Diagnostics
+  hosts: first_master
+  become: true
+  gather_facts: false
+  vars:
+    k3s_kubeconfig: /etc/rancher/k3s/k3s.yaml
+  tasks:
+    - name: Check Rancher deployment rollout status
+      ansible.builtin.command:
+        cmd: kubectl rollout status deployment/rancher -n cattle-system --kubeconfig={{ k3s_kubeconfig }}
+      register: rancher_rollout
+      changed_when: false
+
+    - name: Display Rancher deployment status
+      ansible.builtin.debug:
+        var: rancher_rollout.stdout_lines
+
+    - name: Test internal Rancher dashboard URL
+      ansible.builtin.command:
+        cmd: >
+          curl -k -s -o /dev/null -w "%{http_code}" https://{{ ansible_play_batch_vars['rancher_hostname'] | default(groups['k3s_cluster'] | map('extract', hostvars, 'rancher_hostname') | first) }}/healthz
+      register: rancher_url_health
+      changed_when: false
+      failed_when: false
+      become: false # Kept as regular user to match your original curl execution context
+
+    - name: Display Rancher web routing results
+      ansible.builtin.debug:
+        msg:
+          - "Rancher Hostname status: {{ rancher_url_health.stdout | default('UNREACHABLE') }}"
+

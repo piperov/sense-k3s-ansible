@@ -1,0 +1,18 @@
+---
+- name: Check etcd cluster member health
+  ansible.builtin.command:
+    cmd: k3s etcd-snapshot list
+  register: etcd_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Check Kubernetes node readiness state
+  ansible.builtin.command:
+    cmd: kubectl get nodes --kubeconfig={{ k3s_kubeconfig }}
+  register: node_status
+  changed_when: false
+
+- name: Display cluster node status
+  ansible.builtin.debug:
+    var: node_status.stdout_lines
+
