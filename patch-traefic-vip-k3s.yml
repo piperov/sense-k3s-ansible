@@ -1,0 +1,24 @@
+    - name: Ensure Python kubernetes package is installed
+      ansible.builtin.pip:
+        name:
+          - kubernetes
+          - jsonpatch
+        executable: pip3
+      become: true  # Use true if pip needs root permissions on the target
+
+
+- name: Patch Traefik Service with the Cluster Virtual IP
+  kubernetes.core.k8s_json_patch:
+    kubeconfig: /etc/rancher/k3s/k3s.yaml # Adjust path if executing remotely
+    kind: Service
+    namespace: kube-system
+    name: traefik
+    patch:
+      - op: add
+        path: /spec/externalIPs
+        value:
+          - "{{ kube_vip_address }}" 
+  register: patch_result
+  until: patch_result is succeeded
+  retries: 5
+  delay: 10
