@@ -23,3 +23,59 @@
     msg:
       - "Rancher Hostname status: {{ rancher_url_health.stdout | default('UNREACHABLE') }}"
 
+
+- name: Wait for Rancher GUI to become responsive01
+  ansible.builtin.shell: |
+    # curl -kIv -s -o /dev/null -w "%{http_code}" https://{{ kube_vip_address }}/dashboard/auth/login
+    curl -kIv -s -o /dev/null -w "%{http_code}" https://192.168.1.187/dashboard/auth/login
+  register: curl_check
+  # Safely check if stdout exists before reading its value
+  until: >
+    curl_check.stdout is defined and 
+    (curl_check.stdout == "200" or curl_check.stdout == "302")
+  retries: 12
+  delay: 10
+  delegate_to: localhost
+  changed_when: false
+
+- name: Confirm successful connection
+  ansible.builtin.debug:
+    msg: "Success! Rancher GUI is accessible at https://{{ kube_vip_address }}"
+
+- name: Wait for Rancher GUI to become responsive
+  ansible.builtin.uri:
+    # url: "https://{{ kube_vip_address }}/dashboard/auth/login"
+    url: "https://192.168.1.187/dashboard/auth/login"
+    method: GET
+    validate_certs: false
+    status_code: 
+      - 200
+      - 302
+  register: rancher_check
+  until: rancher_check.status in [200, 302]
+  retries: 12
+  delay: 10
+
+- name: Confirm successful connection
+  ansible.builtin.debug:
+    msg: "Success! Rancher GUI is accessible at https://{{ kube_vip_address }}"
+
+
+- name: Wait for Rancher GUI to become responsive2
+  ansible.builtin.uri:
+    url: "https://{{ kube_vip_address }}/dashboard/auth/login"
+    method: GET
+    validate_certs: false
+    status_code: 
+      - 200
+      - 302
+  register: rancher_check
+  until: rancher_check.status in [200, 302]
+  retries: 12
+  delay: 10
+  delegate_to: localhost
+
+- name: Confirm successful connection
+  ansible.builtin.debug:
+    msg: "Success! Rancher GUI is accessible at https://{{ kube_vip_address }}"
+
