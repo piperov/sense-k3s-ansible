@@ -7,6 +7,7 @@
   tasks:
     - name: Import local cluster health checks
       ansible.builtin.import_tasks: tasks/k3s_local_checks.yml
+  tags: [k3s, diagnostics] # <--- Added tags
 
 # Play 2: Run global cluster queries only from the first master
 - name: Run Global Cluster Control-Plane Diagnostics
@@ -18,6 +19,7 @@
   tasks:
     - name: Import global control-plane diagnostics
       ansible.builtin.import_tasks: tasks/k3s_global_queries.yml
+  tags: [k3s, diagnostics] # <--- Added tags
 
 # Play 3: Test K3s network access endpoints from the first master
 - name: Test External Control Plane Routing Endpoints
@@ -27,6 +29,7 @@
   tasks:
     - name: Import load balancer routing tests
       ansible.builtin.import_tasks: tasks/k3s_network_tests.yml
+  tags: [k3s, network] # <--- Added tags
 
 # Play 4: Run Rancher diagnostics and external URL health checks
 - name: Run Rancher Application Diagnostics
@@ -38,4 +41,31 @@
   tasks:
     - name: Import Rancher health validation tasks
       ansible.builtin.import_tasks: tasks/rancher_diagnostics.yml
+  tags: [rancher] # <--- Dedicated tag for Rancher
 
+# Play 5: Rancher's Web GUI accessibility from local machine
+- name: Verify Rancher GUI Accessibility
+  hosts: localhost
+  gather_facts: false
+    #  vars:
+    # Fallback for testing; replace or define in your host vars
+    # kube_vip_address: "192.168.1.187" 
+
+  tasks:
+    - name: Wait for Rancher GUI to become responsive
+      ansible.builtin.shell: |
+        curl -kIv -s -o /dev/null -w "%{http_code}"  -H "Host: {{ rancher_hostname }}" https://{{ kube_vip_address }}/dashboard/auth/login
+      register: curl_check
+      # Safely check if stdout exists before reading its value
+      until: >
+        curl_check.stdout is defined and 
+        (curl_check.stdout == "200" or curl_check.stdout == "302")
+      retries: 2
+      delay: 10
+      delegate_to: localhost
+      changed_when: false
+    
+    - name: Confirm successful connection
+      ansible.builtin.debug:
+        msg: "Success! Rancher GUI is accessible at https://{{ kube_vip_address }}"
+  tags: [rancher] # <--- Dedicated tag for Rancher
