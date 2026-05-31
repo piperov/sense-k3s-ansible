@@ -136,26 +136,35 @@
       set_fact:
         k3s_token: "{{ node_token.stdout }}"
 
+    - name: Ensure system dependencies for Python are installed
+      ansible.builtin.apt:
+        name:
+          - python3-kubernetes # <--- Debian/Ubuntu packaged version
+          - python3-jsonpatch  # <--- Debian/Ubuntu packaged version
+        state: present
+        update_cache: yes
+      become: true
+          
+    - name: Patch Traefik Service with the Cluster Virtual IP
+      kubernetes.core.k8s_json_patch:
+        kubeconfig: /etc/rancher/k3s/k3s.yaml # Adjust path if executing remotely
+        kind: Service
+        namespace: kube-system
+        name: traefik
+        patch:
+          - op: add
+            path: /spec/externalIPs
+            value:
+              - "{{ kube_vip_address }}" 
+      register: patch_result
+      until: patch_result is succeeded
+      retries: 5
+      delay: 10
+
 - name: Install k3s on additional masters
   hosts: additional_masters
   become: yes
   tasks:
     - name: Install k3s on additional masters
       shell: "curl -sfL https://get.k3s.io | K3S_URL=https://{{ hostvars[groups['first_master'][0]]['ansible_host'] | default(groups['first_master'][0]) }}:6443 K3S_TOKEN={{ hostvars[groups['first_master'][0]]['k3s_token'] }} sh -s - server --tls-san {{ kube_vip_address }} --tls-san {{ kube_vip_fqdn }} --disable servicelb"
-
-- name: Patch Traefik Service with the Cluster Virtual IP
-  kubernetes.core.k8s_json_patch:
-    kubeconfig: /etc/rancher/k3s/k3s.yaml # Adjust path if executing remotely
-    kind: Service
-    namespace: kube-system
-    name: traefik
-    patch:
-      - op: add
-        path: /spec/externalIPs
-        value:
-          - "{{ kube_vip_address }}" 
-  register: patch_result
-  until: patch_result is succeeded
-  retries: 5
-  delay: 10
 
