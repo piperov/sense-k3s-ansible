@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ceph-rbd-test-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Replace with the exact name of your StorageClass
+  storageClassName: ceph-rbd-sc 
+  resources:
+    requests:
+      storage: 1Gi
+

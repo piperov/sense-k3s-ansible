@@ -1,0 +1,22 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ceph-rbd-sc
+provisioner: rbd.csi.ceph.com
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+parameters:
+  # Links to your Monitor IPs ConfigMap
+  clusterID: ead7b777-17d7-461b-a8c7-ce76fe589a78
+  
+  # The name of your Ceph RBD pool (change if yours is different)
+  pool: ceph
+  
+  # Links to the Secret you created earlier
+  csi.storage.k8s.io/provisioner-secret-name: csi-rbd-secret
+  csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+  csi.storage.k8s.io/controller-expand-secret-name: csi-rbd-secret
+  csi.storage.k8s.io/controller-expand-secret-namespace: kube-system
+  csi.storage.k8s.io/node-stage-secret-name: csi-rbd-secret
+  csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+
