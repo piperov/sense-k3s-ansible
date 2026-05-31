@@ -1,0 +1,59 @@
+---
+- name: Verify K3s Hosts Can Mount NFS Share
+  hosts: minipaf  # Targets the actual 'minipaf' K3s nodes defined in your hosts.ini
+  become: true # Needs root privileges to install packages and test mounts
+  gather_facts: false
+
+  vars:
+    # We load the vault to grab your server details safely
+    nfs_server: "{{ vault_nfs_server_ip }}"
+    nfs_path: "{{ vault_nfs_export_path }}"
+    test_mount_point: "/tmp/nfs_preflight_test"
+
+  pre_tasks:
+    - name: Load encrypted vault variables
+      ansible.builtin.include_vars: vault-pipi.yml
+
+  tasks:
+    - name: Ensure NFS client package is installed (Debian/Ubuntu/K3s defaults)
+      ansible.builtin.apt:
+        name: nfs-common
+        state: present
+        update_cache: true
+      when: ansible_os_family | default('Debian') == 'Debian'
+
+    - name: Create a temporary host directory for mount testing
+      ansible.builtin.file:
+        path: "{{ test_mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Attempt to physically mount the NFS share onto the node
+      ansible.posix.mount:
+        path: "{{ test_mount_point }}"
+        src: "{{ nfs_server }}:{{ nfs_path }}"
+        fstype: nfs
+        opts: "rw,soft,timeo=14,nfsvers=4"
+        state: mounted
+      register: host_mount_result
+
+    # --- ADD THIS EXTRA TASK TO CATCH ROOT SQUASHING ERRORS ---
+    - name: Run write-validation check to catch root-squashing errors
+      ansible.builtin.file:
+        path: "{{ test_mount_point }}/.ansible_write_test"
+        state: touch
+
+    - name: Unmount the test share cleanly once confirmed
+      ansible.posix.mount:
+        path: "{{ test_mount_point }}"
+        state: unmounted
+
+    - name: Remove temporary host directory
+      ansible.builtin.file:
+        path: "{{ test_mount_point }}"
+        state: absent
+
+    - name: Print Node Success Message
+      ansible.builtin.debug:
+        msg: "SUCCESS: Host {{ inventory_hostname }} can fully mount and write to the NFS server!"
+

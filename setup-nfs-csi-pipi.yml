@@ -1,0 +1,107 @@
+---
+- name: Deploy and Configure NFS Provisioner in K3s Cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # --- KUBERNETES SETTINGS ---
+    # --- CHANGE THIS TO YOUR DOWNSTREAM KUBECONFIG PATH ---
+    downstream_kubeconfig: "~/.kube/config_minipaf" # Update this path!
+
+    k8s_namespace: "kube-system"
+    storage_class_name: "nfs-shared-sc"
+
+    # --- LINK TO ENCRYPTED VAULT VALUE ---
+    nfs_server: "{{ vault_nfs_server_ip }}"
+    nfs_path: "{{ vault_nfs_export_path }}"
+
+  pre_tasks:
+    - name: Load encrypted vault variables
+      ansible.builtin.include_vars: vault-pipi.yml
+
+  tasks:
+    - name: Add NFS Subdir Provisioner Helm repository
+      kubernetes.core.helm_repository:
+        name: nfs-subdir-external-provisioner
+        repo_url: "https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/"
+        force_update: true
+
+    - name: Deploy NFS Provisioner Helm Chart
+      kubernetes.core.helm:
+        name: nfs-subdir-external-provisioner
+        chart_ref: nfs-subdir-external-provisioner/nfs-subdir-external-provisioner
+        release_namespace: "{{ k8s_namespace }}"
+        create_namespace: true
+        values:
+          nfs:
+            server: "{{ nfs_server }}"
+            path: "{{ nfs_path }}"
+            readOnly: false # <--- FORCE THIS TO FALSE
+          storageClass:
+            name: "{{ storage_class_name }}"
+            defaultClass: false # Kept as false so Ceph remains your primary default
+            allowVolumeExpansion: true
+            reclaimPolicy: Delete
+            # Automatically names the directories created inside your NFS share
+            pathPattern: "${.PVC.namespace}/${.PVC.name}" 
+
+# --- AUTOMATED NFS MOUNT TESTING PLAY BLOCK ---
+- name: Verify NFS Shared Mount with a Test Workload
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Deploy Test NFS PVC (Requesting large size)
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: nfs-test-mount-pvc
+            namespace: default
+          spec:
+            accessModes:
+              - ReadWriteMany # Allows multiple nodes to write concurrently
+            storageClassName: "nfs-shared-sc"
+            resources:
+              requests:
+                storage: 50Gi # Testing with a much larger size as requested
+
+    - name: Deploy Test Pod mounting the NFS share
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: nfs-test-mount-pod
+            namespace: default
+          spec:
+            containers:
+              - name: web-server
+                image: nginx:alpine
+                volumeMounts:
+                  - name: nfs-storage
+                    mountPath: /usr/share/nginx/html
+            volumes:
+              - name: nfs-storage
+                persistentVolumeClaim:
+                  claimName: nfs-test-mount-pvc
+
+    - name: Wait for Test Pod to be Running (Verifies successful network attachment)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        name: nfs-test-mount-pod
+        namespace: default
+      register: pod_status
+      until: "pod_status.resources[0].status.phase == 'Running'"
+      retries: 2
+      delay: 10
+
+    - name: Confirm NFS Mount Success
+      ansible.builtin.debug:
+        msg: "SUCCESS! NFS shared volume successfully provisioned and mounted across the cluster!"
+
