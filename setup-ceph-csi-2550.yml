@@ -1,0 +1,142 @@
+---
+- name: Deploy and Configure Ceph-CSI in K3s Cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # --- CEPH CONFIGURATION ---
+    ceph_cluster_id: "87c4cd1f-222b-4b88-a7a1-db1c68893449"
+    ceph_pool_name: "cephnvme"
+    ceph_user_id: "admin"
+    # --- LINK TO ENCRYPTED VAULT VALUE ---
+    ceph_user_key: "{{ vault_ceph_user_key }}"
+    
+    ceph_monitors:
+      - "172.18.81.10:6789"
+      - "172.18.81.11:6789"
+      - "172.18.81.12:6789"
+
+    # --- KUBERNETES SETTINGS ---
+    k8s_namespace: "kube-system"
+    storage_class_name: "ceph-rbd-sc"
+
+  pre_tasks:
+    - name: Load encrypted vault variables
+      ansible.builtin.include_vars: vault-2550.yml
+
+  tasks:
+    - name: Add Ceph-CSI Helm repository
+      kubernetes.core.helm_repository:
+        name: ceph-csi
+        repo_url: "https://ceph.github.io/csi-charts"
+        force_update: true # Fixes the "already exists" fatal error
+
+    - name: Deploy Ceph-CSI RBD Helm Chart with Monitor IPs
+      kubernetes.core.helm:
+        name: ceph-csi-rbd
+        chart_ref: ceph-csi/ceph-csi-rbd
+        release_namespace: "{{ k8s_namespace }}"
+        create_namespace: true
+        values:
+          csiConfigmapNamespace: "{{ k8s_namespace }}"
+          csiConfig:
+            - clusterID: "{{ ceph_cluster_id }}"
+              monitors: "{{ ceph_monitors }}"
+
+    - name: Create or update the Ceph Authentication Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: csi-rbd-secret
+            namespace: "{{ k8s_namespace }}"
+          type: Opaque
+          stringData:
+            userID: "{{ ceph_user_id }}"
+            userKey: "{{ ceph_user_key }}"
+
+    - name: Deploy Ceph StorageClass
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: "{{ storage_class_name }}"
+            annotations:
+              storageclass.kubernetes.io/is-default-class: "true"
+          provisioner: rbd.csi.ceph.com
+          allowVolumeExpansion: true
+          volumeBindingMode: Immediate
+          parameters:
+            clusterID: "{{ ceph_cluster_id }}"
+            pool: "{{ ceph_pool_name }}"
+            csi.storage.k8s.io/provisioner-secret-name: csi-rbd-secret
+            csi.storage.k8s.io/provisioner-secret-namespace: "{{ k8s_namespace }}"
+            csi.storage.k8s.io/controller-expand-secret-name: csi-rbd-secret
+            csi.storage.k8s.io/controller-expand-secret-namespace: "{{ k8s_namespace }}"
+            csi.storage.k8s.io/node-stage-secret-name: csi-rbd-secret
+            csi.storage.k8s.io/node-stage-secret-namespace: "{{ k8s_namespace }}"
+
+# --- NEW AUTOMATED MOUNT TESTING PLAY BLOCK ---
+- name: Verify Node Mount with a Test Workload
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Deploy Test PVC
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: ceph-test-mount-pvc
+            namespace: default
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: "ceph-rbd-sc"
+            resources:
+              requests:
+                storage: 1Gi
+
+    - name: Deploy Test Pod mounting the PVC
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: ceph-test-mount-pod
+            namespace: default
+          spec:
+            containers:
+              - name: web-server
+                image: nginx:alpine
+                volumeMounts:
+                  - name: ceph-storage
+                    mountPath: /usr/share/nginx/html
+            volumes:
+              - name: ceph-storage
+                persistentVolumeClaim:
+                  claimName: ceph-test-mount-pvc
+
+    - name: Wait for Test Pod to be Running (Verifies actual node mount)
+      kubernetes.core.k8s_info:
+        kind: Pod
+        name: ceph-test-mount-pod
+        namespace: default
+      register: pod_status
+      until: "pod_status.resources[0].status.phase == 'Running'"
+      retries: 12
+      delay: 10
+
+    - name: Confirm Mount Success
+      ansible.builtin.debug:
+        msg: "SUCCESS! Ceph volume successfully provisioned, attached, and mounted onto the K3s worker node!"
+
