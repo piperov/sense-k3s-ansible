@@ -1,0 +1,81 @@
+---
+- name: Deploy Prometheus and Grafana Monitoring Stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # --- KUBERNETES TARGET SETTINGS ---
+    downstream_kubeconfig: "/home/piperov/.kube/config_minipaf"
+    k8s_namespace: "monitoring"
+    grafana_domain: "grafana.internal"  # URL to open your dashboards
+
+    # --- STORAGE CLASS CONFIG ---
+    block_storage_class: "ceph-rbd-sc"
+
+    # --- ENCRYPTED VAULT READS ---
+    grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+  pre_tasks:
+    - name: Load encrypted vault variables
+      ansible.builtin.include_vars: vault-pipi.yml
+
+  tasks:
+    - name: Add Prometheus Community Helm repository
+      kubernetes.core.helm_repository:
+        name: prometheus-community
+        repo_url: "https://prometheus-community.github.io/helm-charts"
+        force_update: true
+
+    - name: Ensure Monitoring Namespace exists on downstream cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ downstream_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ k8s_namespace }}"
+
+    - name: Deploy Kube-Prometheus-Stack via Helm Chart
+      kubernetes.core.helm:
+        name: kube-prometheus-stack
+        chart_ref: prometheus-community/kube-prometheus-stack
+        release_namespace: "{{ k8s_namespace }}"
+        kubeconfig: "{{ downstream_kubeconfig }}"
+        wait: false  # Trigger immediately without blocking your shell terminal
+        values:
+          # --- SECURE ADMINISTRATIVE INITIALIZATION ---
+          grafana:
+            adminPassword: "{{ grafana_admin_password }}"
+            
+            # --- PERSIST DASHBOARDS ON CEPH RBD ---
+            persistence:
+              enabled: true
+              storageClassName: "{{ block_storage_class }}"
+              size: 5Gi
+              accessModes:
+                - ReadWriteOnce
+
+            # --- BUILT-IN INGRESS ROUTING (TRAEFIK) ---
+            ingress:
+              enabled: true
+              ingressClassName: traefik
+              hosts:
+                - "{{ grafana_domain }}"
+              path: /
+
+          # --- PROMETHEUS STORAGE RETENTION (OPTIONAL) ---
+          prometheus:
+            prometheusSpec:
+              retention: 14d  # Keeps 2 weeks of history records
+              storageSpec:
+                volumeClaimTemplate:
+                  spec:
+                    storageClassName: "{{ block_storage_class }}"
+                    accessModes:
+                      - ReadWriteOnce
+                    resources:
+                      requests:
+                        storage: 20Gi  # Dedicated block storage for metrics history
+

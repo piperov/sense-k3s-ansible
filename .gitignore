@@ -1,0 +1,10 @@
+# Ignore temporary vault password files if used locally
+.vault_pass
+*.password
+
+# Ignore system/editor swap backups
+*.swp
+.DS_Store
+
+# Keep your encrypted vault file tracked, but protect plaintext raw secrets
+!vault.yml

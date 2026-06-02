@@ -1,0 +1,162 @@
+---
+- name: Deploy Nextcloud with Ceph and NFS Storage
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # --- KUBERNETES TARGET SETTINGS ---
+    downstream_kubeconfig: "/home/piperov/.kube/config_minipaf"
+    k8s_namespace: "nextcloud"
+
+    # --- PRIVACY & DOMAIN SETTINGS ---
+    nextcloud_domain: "nextcloud.internal"  # Update to your preferred domain/IP
+    nextcloud_admin_user: "admin"
+
+    # --- STORAGE CLASS ASSIGNMENTS ---
+    block_storage_class: "ceph-rbd-sc"
+    file_storage_class: "nfs-shared-sc"
+
+    # --- ENCRYPTED VAULT READS ---
+    nextcloud_admin_password: "{{ vault_nextcloud_admin_password }}"
+    nextcloud_db_password: "{{ vault_nextcloud_db_password }}"
+
+  pre_tasks:
+    - name: Load encrypted vault variables
+      ansible.builtin.include_vars: vault-pipi.yml
+
+  tasks:
+    - name: Add Nextcloud Helm repository
+      kubernetes.core.helm_repository:
+        name: nextcloud
+        repo_url: "https://nextcloud.github.io/helm/"
+        force_update: true
+
+    - name: Ensure Namespace exists on downstream cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ downstream_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ k8s_namespace }}"
+
+    - name: Deploy Nextcloud via Helm Chart
+      kubernetes.core.helm:
+        name: nextcloud
+        chart_ref: nextcloud/nextcloud
+        release_namespace: "{{ k8s_namespace }}"
+        kubeconfig: "{{ downstream_kubeconfig }}"
+        wait: false
+        timeout: "600s"
+        values:
+          image:
+            repository: nextcloud
+            tag: 33.0.3 # Drops -fpm-alpine so Apache serves port 80 natively
+              # tag: 33.0.3-fpm-alpine # Blazing-fast alpine variant
+          # 1. CORE NEXTCLOUD LAYER
+          nextcloud:
+            host: "{{ nextcloud_domain }}"
+            username: "{{ nextcloud_admin_user }}"
+            password: "{{ nextcloud_admin_password }}"
+            configs:
+              check_data_directory_permissions: "false"
+            mail.stringData:
+              NEXTCLOUD_TRUSTED_DOMAINS: "nextcloud.local localhost 127.0.0.1 10.42.0.0/16"
+
+
+          # 2. SHARED FILE STORAGE LAYER (NFS)
+          persistence:
+            enabled: true
+            storageClass: "{{ file_storage_class }}"
+            accessMode: ReadWriteMany
+            size: 100Gi
+            nextcloudDataPath: /var/www/html/data # <--- Pin NFS strictly to user uploads
+
+
+          # 3. DISCONNECTED DEFAULT SQLITE 
+          internalDatabase:
+            enabled: false
+
+          # 4. SINGLE POSTGRESQL LAYER BLOCK (Merged together)
+          postgresql:
+            enabled: true
+            global:
+              postgresql:
+                auth:
+                  database: nextcloud
+                  username: nextcloud
+                  password: "{{ nextcloud_db_password }}"
+            primary:
+              persistence:
+                enabled: true
+                storageClass: "{{ block_storage_class }}"
+                size: 10Gi
+
+          # 5. INITIALIZATION CONTAINER LAYOUT
+          deployment:
+            progressDeadlineSeconds: 1800 # 30 minutes (Prevents the deadline error)
+            initContainers:
+              - name: chown-nfs-data
+                image: alpine
+                command: ["sh", "-c", "chown -R 82:82 /var/www/html/data"]
+                securityContext:
+                  runAsUser: 0
+                volumeMounts:
+                  - name: nextcloud-data
+                    mountPath: /var/www/html/data
+
+          # 6. GRACEFUL RUNWAY TIMEOUT PROBES
+          livenessProbe:
+            enabled: true
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            tcpSocket:
+              port: 9000 # Targets the raw PHP-FPM communication port directly
+            httpGet: null # Clears out the broken default HTTP request loop
+          readinessProbe:
+            enabled: true
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            tcpSocket:
+              port: 9000 # Targets the raw PHP-FPM communication port directly
+            httpGet: null # Clears out the broken default HTTP request loop
+          startupProbe:
+            enabled: true
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 360
+
+          # 7. SCALE BOUNDARIES
+          replicaCount: 2
+
+    - name: Deploy K3s Traefik Ingress Router for Nextcloud
+      kubernetes.core.k8s:
+        kubeconfig: "{{ downstream_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: nextcloud-ingress
+            namespace: "{{ k8s_namespace }}"
+            annotations:
+              # Tells Traefik to allow large file uploads (crucial for Nextcloud)
+              traefik.ingress.kubernetes.io/router.clientmaxbodysize: "10240M"
+          spec:
+            ingressClassName: traefik # Uses the default K3s Traefik controller
+            rules:
+              - host: "{{ nextcloud_domain }}" # Resolves to 'nextcloud.internal'
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: nextcloud
+                          port:
+                            number: 80
+            tls:
+            - hosts:
+              - "{{ nextcloud_domain }}"

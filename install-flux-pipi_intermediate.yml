@@ -1,0 +1,85 @@
+---
+- name: Install K3s and Bootstrap Flux CD
+  hosts: kubernetes_nodes
+  become: true
+  vars:
+    github_user: "your-github-username"
+    github_repo: "your-gitops-repository"
+    github_branch: "main"
+    flux_cluster_path: "./clusters/production"
+    github_token: "{{ env_github_token | default('') }}"
+
+  tasks:
+    - name: Ensure curl and system prerequisites are installed
+      ansible.builtin.package:
+        name:
+          - curl
+          - git
+        state: present
+
+    - name: Download and execute K3s installation script
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for K3s node to be ready
+      ansible.builtin.command: k3s kubectl get nodes
+      register: k3s_nodes_check
+      until: '"Ready" in k3s_nodes_check.stdout'
+      retries: 10
+      delay: 5
+      changed_when: false
+
+    - name: Create fallback local kube directory for default user
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0700'
+
+    - name: Link cluster kubeconfig to default path
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+
+    - name: Install Flux CD CLI tool via official installer
+      ansible.builtin.shell: |
+        curl -s https://fluxcd.io/install.sh | bash
+      args:
+        creates: /usr/local/bin/flux
+
+    - name: Run Flux pre-flight environment checks
+      ansible.builtin.command: flux check --pre
+      environment:
+        KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+      register: flux_pre_check
+      changed_when: false
+      failed_when: "'✔' not in flux_pre_check.stdout and 'passed' not in flux_pre_check.stdout"
+
+    - name: Bootstrap Flux CD onto the K3s Cluster
+      ansible.builtin.command: >
+        flux bootstrap github \
+          --owner={{ github_user }} \
+          --repository={{ github_repo }} \
+          --branch={{ github_branch }} \
+          --path={{ flux_cluster_path }} \
+          --personal
+      environment:
+        GITHUB_TOKEN: "{{ github_token }}"
+        KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+      register: flux_bootstrap_output
+      changed_when: "'all components are healthy' in flux_bootstrap_output.stdout"
+
+    - name: Verify cluster state and deployment reconciliation
+      ansible.builtin.command: flux check
+      environment:
+        KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+      register: flux_final_check
+      changed_when: false
+
