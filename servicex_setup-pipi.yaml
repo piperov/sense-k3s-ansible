@@ -59,6 +59,11 @@
             usercert.pem: "{{ vault_grid_cert | b64encode }}"
             userkey.pem: "{{ vault_grid_key | b64encode }}"
             passphrase: "{{ vault_grid_passphrase | b64encode }}"
+
+            # Using your exact .crt filenames from the download step
+            CERN-GridCA.crt: "{{ lookup('file', lookup('env', 'HOME') + '/grid-ca-certs/CERN-GridCA.crt') | b64encode }}"
+            CERN-Root-2.crt: "{{ lookup('file', lookup('env', 'HOME') + '/grid-ca-certs/CERN-Root-2.crt') | b64encode }}"
+
         state: present
 
 
@@ -74,8 +79,11 @@
         kubeconfig: "{{ kubeconfig_path }}"
         kind: Pod
         namespace: servicex
+          # label_selectors:
+          # - app.kubernetes.io/name=servicex
+        # Updated to match the specific application string running on minipaf
         label_selectors:
-          - app.kubernetes.io/name=servicex
+          - app.kubernetes.io/component=app
       register: servicex_pods
       until: >
         servicex_pods.resources | length > 0 and 

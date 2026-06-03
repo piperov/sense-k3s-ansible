@@ -24,8 +24,10 @@ spec:
         name: ssl-hep
         namespace: servicex
   values:
-    # Tell ServiceX to mount the Grid certificates injected by Ansible
-    gridCertSecret: "servicex-grid-certs"
+    # 1. Instruct the chart to pull credentials from a dedicated secret
+    gridCertSecret: "grid-certs-secret"
+      # # Tell ServiceX to mount the Grid certificates injected by Ansible
+      # gridCertSecret: "servicex-grid-certs"
     # Basic sizing configuration matching readthedocs guidelines
     replicas: 1
     # Corrected map structure for the ServiceX Rucio template engine
