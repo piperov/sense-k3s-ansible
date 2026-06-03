@@ -32,6 +32,9 @@ spec:
     didFinder:
       rucio:
         enabled: true
+    # FIX: Re-route the authentication engine to use CMS instead of ATLAS
+    x509Secrets:
+      vomsOrg: "cms"
     # FIX: Point the sub-chart dependencies to the correct legacy repositories
     minio:
       image:

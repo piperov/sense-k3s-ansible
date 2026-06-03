@@ -13,6 +13,9 @@
     
     # Target path inside your GitOps repository layout
     servicex_gitops_path: "{{ github_repo_path }}/clusters/minipaf-pipi/servicex"
+    # Target endpoint for verification
+    servicex_endpoint: "http://servicex.internal"
+    k3s_node_ip: "192.168.1.165"
 
   tasks:
     - name: Ensure Python3 pip is available
@@ -49,13 +52,13 @@
           apiVersion: v1
           kind: Secret
           metadata:
-            #  name: servicex-grid-certs
             name: grid-certs-secret  # <--- Changed this line!
             namespace: servicex
           type: Opaque
           data:
             usercert.pem: "{{ vault_grid_cert | b64encode }}"
             userkey.pem: "{{ vault_grid_key | b64encode }}"
+            passphrase: "{{ vault_grid_passphrase | b64encode }}"
         state: present
 
 
