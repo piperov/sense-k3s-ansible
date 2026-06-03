@@ -57,3 +57,33 @@
             userkey.pem: "{{ vault_grid_key | b64encode }}"
         state: present
 
+
+    - name: Add local DNS mapping for the ServiceX Dashboard Ingress
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ k3s_node_ip }} servicex.internal"
+        state: present
+      become: true
+
+    - name: Wait for Flux to synchronize manifests and spin up pods
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Pod
+        namespace: servicex
+        label_selectors:
+          - app.kubernetes.io/name=servicex
+      register: servicex_pods
+      until: >
+        servicex_pods.resources | length > 0 and 
+        (servicex_pods.resources | map(attribute='status.phase') | unique == ['Running'])
+      retries: 20
+      delay: 15
+
+    - name: Verify cluster health deployment via local servicex-cli
+      ansible.builtin.command: "servicex info --endpoint {{ servicex_endpoint }}"
+      register: cli_verification
+      changed_when: false
+
+    - name: Print ServiceX CLI Status Report
+      ansible.builtin.debug:
+        var: cli_verification.stdout_lines
