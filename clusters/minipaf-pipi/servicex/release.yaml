@@ -1,0 +1,33 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: ssl-hep
+  namespace: servicex
+spec:
+  interval: 2h
+  url: https://github.io
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: servicex
+  namespace: servicex
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: servicex
+      version: "1.0.0" # Match the latest stable deployment version
+      sourceRef:
+        kind: HelmRepository
+        name: ssl-hep
+        namespace: servicex
+  values:
+    # Tell ServiceX to mount the Grid certificates injected by Ansible
+    gridCertSecret: "servicex-grid-certs"
+    # Basic sizing configuration matching readthedocs guidelines
+    replicas: 1
+    didFinder:
+      rucio: true
+
