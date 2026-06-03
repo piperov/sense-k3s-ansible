@@ -28,8 +28,12 @@ spec:
     gridCertSecret: "servicex-grid-certs"
     # Basic sizing configuration matching readthedocs guidelines
     replicas: 1
+    # Corrected map structure for the ServiceX Rucio template engine
     didFinder:
-      rucio: true
+      rucio:
+        enabled: true
+          # didFinder:
+          # rucio: true
     # Exposed Ingress configuration for Traefik
     ingress:
       enabled: true
