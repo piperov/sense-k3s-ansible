@@ -1,0 +1,59 @@
+---
+- name: Prepare Local Workstation and Cluster for ServiceX
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vault-pipi.yml  # Contains: vault_grid_cert and vaulted_grid_key
+
+  vars:
+    kubeconfig_path: "{{ lookup('env', 'HOME') }}/.kube/config_minipaf"
+    github_repo_path: "{{ lookup('env', 'HOME') }}/sense-k3s-ansible"
+    
+    # Target path inside your GitOps repository layout
+    servicex_gitops_path: "{{ github_repo_path }}/clusters/minipaf-pipi/servicex"
+
+  tasks:
+    - name: Ensure Python3 pip is available
+      ansible.builtin.package:
+        name: python3-pip
+        state: present
+      become: true
+
+    - name: Install ServiceX CLI tool locally
+      ansible.builtin.pip:
+        name: servicex-cli
+        state: present
+
+    - name: Create local staging folder structure in Git repository
+      ansible.builtin.file:
+        path: "{{ servicex_gitops_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Ensure servicex namespace exists on cluster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: servicex
+        state: present
+
+    - name: Inject sensitive Grid Certificates directly to Cluster Namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: servicex-grid-certs
+            namespace: servicex
+          type: Opaque
+          data:
+            usercert.pem: "{{ vault_grid_cert | b64encode }}"
+            userkey.pem: "{{ vault_grid_key | b64encode }}"
+        state: present
+

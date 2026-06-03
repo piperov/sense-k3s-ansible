@@ -30,4 +30,12 @@ spec:
     replicas: 1
     didFinder:
       rucio: true
-
+    # Exposed Ingress configuration for Traefik
+    ingress:
+      enabled: true
+      className: traefik
+      hosts:
+        - host: servicex.local
+          paths:
+            - path: /
+              pathType: ImplementationSpecific
