@@ -6,7 +6,7 @@ metadata:
   namespace: servicex
 spec:
   interval: 2h
-  url: https://github.io
+  url: "https://ssl-hep.github.io/ssl-helm-charts/"
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -18,7 +18,7 @@ spec:
   chart:
     spec:
       chart: servicex
-      version: "1.0.0" # Match the latest stable deployment version
+      version: "1.1.4"  # Uses stable helm package registry tracking 
       sourceRef:
         kind: HelmRepository
         name: ssl-hep
