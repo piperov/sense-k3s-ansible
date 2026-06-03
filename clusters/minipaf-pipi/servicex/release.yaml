@@ -32,8 +32,16 @@ spec:
     didFinder:
       rucio:
         enabled: true
-          # didFinder:
-          # rucio: true
+    # FIX: Point the sub-chart dependencies to the correct legacy repositories
+    minio:
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/minio
+
+    rabbitmq:
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/rabbitmq
     # Exposed Ingress configuration for Traefik
     ingress:
       enabled: true
