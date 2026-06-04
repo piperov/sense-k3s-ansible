@@ -37,6 +37,9 @@ spec:
     # FIX: Re-route the authentication engine to use CMS instead of ATLAS
     x509Secrets:
       vomsOrg: "cms"
+    # FIX: Point to correct CMS VOMS servers
+      vomses: |
+        "cms" "voms-cms-auth.cern.ch" "443" "/DC=ch/DC=cern/OU=computers/CN=cms-auth.cern.ch""cms"
     # FIX: Point the sub-chart dependencies to the correct legacy repositories
     minio:
       image:
