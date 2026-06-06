@@ -5,17 +5,14 @@
   gather_facts: false
 
   vars_files:
-    - vault-pipi.yml  # Contains: vault_grid_cert and vaulted_grid_key
+    - vault-pipi.yml # Contains: vault_grid_cert, vault_grid_key, vault_grid_passphrase
 
   vars:
     kubeconfig_path: "{{ lookup('env', 'HOME') }}/.kube/config_minipaf"
     github_repo_path: "{{ lookup('env', 'HOME') }}/sense-k3s-ansible"
     
-    # Target path inside your GitOps repository layout
-    servicex_gitops_path: "{{ github_repo_path }}/clusters/minipaf-pipi/servicex"
-    # Target endpoint for verification
     servicex_endpoint: "http://servicex.internal"
-    k3s_node_ip: "192.168.1.165"
+    k3s_node_ip: "192.168.1.165" 
 
   tasks:
     - name: Ensure Python3 pip is available
@@ -28,44 +25,33 @@
       ansible.builtin.pip:
         name: servicex-cli
         state: present
+      tags: servicex-cli
 
-    - name: Create local staging folder structure in Git repository
-      ansible.builtin.file:
-        path: "{{ servicex_gitops_path }}"
-        state: directory
-        mode: '0755'
-
-    - name: Ensure servicex namespace exists on cluster
+    - name: Ensure minipaf namespace exists on cluster
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         definition:
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: servicex
+            name: minipaf
         state: present
 
-    - name: Inject sensitive Grid Certificates directly to Cluster Namespace
+    - name: Inject standard Grid credentials into the target secret
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         definition:
           apiVersion: v1
           kind: Secret
           metadata:
-            name: grid-certs-secret  # <--- Changed this line!
-            namespace: servicex
+            name: grid-certs-secret
+            namespace: minipaf
           type: Opaque
           data:
             usercert.pem: "{{ vault_grid_cert | b64encode }}"
             userkey.pem: "{{ vault_grid_key | b64encode }}"
             passphrase: "{{ vault_grid_passphrase | b64encode }}"
-
-            # Using your exact .crt filenames from the download step
-            CERN-GridCA.crt: "{{ lookup('file', lookup('env', 'HOME') + '/grid-ca-certs/CERN-GridCA.crt') | b64encode }}"
-            CERN-Root-2.crt: "{{ lookup('file', lookup('env', 'HOME') + '/grid-ca-certs/CERN-Root-2.crt') | b64encode }}"
-
         state: present
-
 
     - name: Add local DNS mapping for the ServiceX Dashboard Ingress
       ansible.builtin.lineinfile:
@@ -74,28 +60,3 @@
         state: present
       become: true
 
-    - name: Wait for Flux to synchronize manifests and spin up pods
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        kind: Pod
-        namespace: servicex
-          # label_selectors:
-          # - app.kubernetes.io/name=servicex
-        # Updated to match the specific application string running on minipaf
-        label_selectors:
-          - app.kubernetes.io/component=app
-      register: servicex_pods
-      until: >
-        servicex_pods.resources | length > 0 and 
-        (servicex_pods.resources | map(attribute='status.phase') | unique == ['Running'])
-      retries: 20
-      delay: 15
-
-    - name: Verify cluster health deployment via local servicex-cli
-      ansible.builtin.command: "servicex info --endpoint {{ servicex_endpoint }}"
-      register: cli_verification
-      changed_when: false
-
-    - name: Print ServiceX CLI Status Report
-      ansible.builtin.debug:
-        var: cli_verification.stdout_lines

@@ -8,54 +8,73 @@ spec:
   interval: 2h
   url: "https://ssl-hep.github.io/ssl-helm-charts/"
 ---
-apiVersion: helm.toolkit.fluxcd.io/v2
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
 kind: HelmRelease
 metadata:
   name: servicex
-  namespace: servicex
+  namespace: minipaf
 spec:
-  interval: 1h
+  releaseName: servicex
+  interval: 5m
   chart:
     spec:
       chart: servicex
-      version: "1.1.4"  # Uses stable helm package registry tracking 
+      version: v1.8.3
       sourceRef:
         kind: HelmRepository
         name: ssl-hep
-        namespace: servicex
+        namespace: flux-system
+      interval: 1m
   values:
-    # 1. Instruct the chart to pull credentials from a dedicated secret
+    # Instruct the chart to pull credentials from a dedicated secret
     gridCertSecret: "grid-certs-secret"
-      # # Tell ServiceX to mount the Grid certificates injected by Ansible
-      # gridCertSecret: "servicex-grid-certs"
     # Basic sizing configuration matching readthedocs guidelines
     replicas: 1
-    # Corrected map structure for the ServiceX Rucio template engine
+
+    # --- Infrastructure & Global Configurations ---
+    postgres:
+      enabled: true
+    objectStore:
+      publicURL: localhost:9000
+    gridAccount: piperov
+
+    # --- Code Generator Block ---
+    codeGen:
+      uproot-raw:
+        enabled: true
+        image: sslhep/servicex_code_gen_raw_uproot
+        tag: "v1.8.3"
+      defaultScienceContainerImage: sslhep/servicex_science_image_combined_root
+      defaultScienceContainerTag: 5.7.2-6.38.04
+      compressionAlgorithm: ZSTD
+      compressionLevel: 0
+      atlasr21:
+        enabled: false
+      atlasr22:
+        enabled: false
+      atlasr25:
+        enabled: false
+      topcp:
+        enabled: false
+
+    # --- Dataset ID (DID) Finder Blocks ---
     didFinder:
       rucio:
-        enabled: true
-    # FIX: Re-route the authentication engine to use CMS instead of ATLAS
-    x509Secrets:
-      vomsOrg: "cms"
-    # FIX: Point to correct CMS VOMS servers
-      vomses: |
-        "cms" "voms-cms-auth.cern.ch" "443" "/DC=ch/DC=cern/OU=computers/CN=cms-auth.cern.ch""cms"
-    # FIX: Point the sub-chart dependencies to the correct legacy repositories
-    minio:
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/minio
+        enabled: false
+        rucio_host: http://cms-rucio.cern.ch
+        auth_host: https://cms-rucio-auth.cern.ch
 
-    rabbitmq:
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/rabbitmq
-    # Exposed Ingress configuration for Traefik
-    ingress:
-      enabled: true
-      className: traefik
-      hosts:
-        - host: servicex.local
-          paths:
-            - path: /
-              pathType: ImplementationSpecific
+        threads: 2
+        site: T2_US_Purdue
+      CERNOpenData:
+        enabled: true
+        pullPolicy: Always
+      xrootd:
+        enabled: true
+        image: sslhep/servicex-did-finder-xrootd
+        tag: "v1.8.3"
+      atlasopenmagic:
+        enabled: false
+      x509Secrets:
+        vomsOrg: cms
+
