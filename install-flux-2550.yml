@@ -1,0 +1,104 @@
+---
+- name: Bootstrap Flux CD on Existing Minipaf Cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vault-2550.yml  # This file contains: vaulted_github_token: "ghp_..."
+  vars:
+    # Cluster configuration
+    kubeconfig_path: "{{ lookup('env', 'HOME') }}/.kube/config_minipaf"
+    
+    # GitOps configuration (override these via --extra-vars)
+    github_user: "piperov"
+    github_repo: "my-agy-projects/k3s-ansible"
+    github_branch: "main"
+    # Local path to your cloned GitOps repo directory
+    local_gitops_repo_path: "{{ lookup('env', 'HOME') }}/{{ github_repo }}"
+    # The relative path inside the repo where Flux will write cluster manifests
+    flux_cluster_path: "./clusters/minipaf-2550"
+    
+    # Map the vault variable safely
+    github_token: "{{ vault_github_token }}"
+   # Pull token securely from system environment
+   # github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+
+  tasks:
+    - name: Ensure local GitOps directory exists
+      ansible.builtin.stat:
+        path: "{{ local_gitops_repo_path }}"
+      register: gitops_dir
+      failed_when: not gitops_dir.stat.exists or not gitops_dir.stat.isdir
+
+    - name: Verify cluster path directory layout exists
+      ansible.builtin.file:
+        path: "{{ local_gitops_repo_path }}/{{ flux_cluster_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check for standard base or infrastructure layouts
+      ansible.builtin.stat:
+        path: "{{ local_gitops_repo_path }}/{{ item }}"
+      register: layout_paths
+      loop:
+        - apps
+        - infrastructure
+        - base
+
+    - name: Display found GitOps directory structures
+      ansible.builtin.debug:
+        msg: "Found optional layout directory: {{ item.item }}"
+      when: item.stat.exists
+      loop: "{{ layout_paths.results }}"
+
+    - name: Validate that the specific kubeconfig file exists
+      ansible.builtin.stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_file
+      failed_when: not kubeconfig_file.stat.exists
+
+    - name: Download and install Flux CLI locally
+      ansible.builtin.shell: |
+        curl -s https://fluxcd.io/install.sh | bash
+        # args:
+        #   creates: /usr/local/bin/flux
+      become: true  # Requires sudo locally to write to /usr/local/bin
+
+    - name: Verify cluster connectivity and pre-flight requirements
+      ansible.builtin.command: flux check --pre
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: flux_pre_check
+      changed_when: false
+      failed_when: >
+        'prerequisites checks passed' not in flux_pre_check.stderr and 
+        'prerequisites checks passed' not in flux_pre_check.stdout
+
+
+    - name: Bootstrap Flux CD into the minipaf cluster
+      ansible.builtin.command: >
+        flux bootstrap github \
+          --owner={{ github_user }} \
+          --repository={{ github_repo }} \
+          --branch={{ github_branch }} \
+          --path={{ flux_cluster_path }} \
+          --personal
+      environment:
+        GITHUB_TOKEN: "{{ github_token }}"
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: flux_bootstrap_output
+      # Retry if the API server drops the connection on heavy CRD patches
+      until: flux_bootstrap_output.rc == 0
+      retries: 3
+      delay: 15
+      changed_when: "'all components are healthy' in flux_bootstrap_output.stdout"
+      failed_when: "'all components are healthy' not in flux_bootstrap_output.stderr and flux_bootstrap_output.rc != 0"
+
+    - name: Run final health check verification
+      ansible.builtin.command: flux check
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      register: flux_final_check
+      changed_when: false
+
